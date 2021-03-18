@@ -9,7 +9,7 @@ unique_lemmas = {}
 non_unique_lemmas = defaultdict(list)
 with open(BIN_DATA) as f:
     for line in tqdm(f):
-        form, id, gen, fl, lemma, pos = line.strip().split(";")
+        lemma, id, gen, fl, form, pos = line.strip().split(";")
         key = f"{form}-{pos}-{gen}"
         if key in unique_lemmas:
             if unique_lemmas[key] != lemma:
