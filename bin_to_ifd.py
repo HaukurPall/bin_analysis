@@ -1,6 +1,9 @@
 import itertools
+import logging
 import re
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 ORÐFLOKKUR = {"n", "l", "f", "g", "t", "s", "a", "c", "k", "e", "x", "v", "p", "m"}
 KYN = {"k", "v", "h"}
@@ -155,6 +158,9 @@ def tala(mork: str) -> str:
 
 
 def fall(mork: str) -> str:
+    if "OP" in mork:
+        # Ópersónuleg beyging sem stýrir falli - þetta er ekki fall sagnarinnar.
+        return ""
     if "NF" in mork:
         return "n"
     if "ÞF" in mork:
@@ -196,6 +202,9 @@ def pers(mork: str) -> str:
         return "2"
     if "3P" in mork:
         return "3"
+    if "BH" in mork:
+        # Boðháttur er alltaf í 2.P
+        return "2"
     return ""
 
 
@@ -223,20 +232,23 @@ def mynd(mork: str) -> str:
         return "g"
     if "MM" in mork:
         return "m"
-    if "LHÞT" in mork:
-        # Allur LHÞT í BÍN er í germynd
+    if "LH" in mork:
+        # Allur LH í BÍN er í germynd
         return "g"
     return ""
 
 
 def tíð(mork: str) -> str:
+    if "LH" in mork:
+        # Lýsingarháttur hefur ekki tíð í marki
+        return ""
     if "NT" in mork:
         return "n"
     if "ÞT" in mork:
-        # Til að við tvíteljum ekki tíðina
-        if "LHÞT" in mork:
-            return ""
         return "þ"
+    # Boðháttur er alltaf í nútíð
+    if "BH" in mork:
+        return "n"
     return ""
 
 
@@ -293,7 +305,37 @@ def ábfn(lemma: str) -> bool:
 
 
 def óákveðið_ábfn(lemma: str) -> bool:
-    return lemma in {"slíkur", "sjálfur", "samur", "sami", "þvílíkur"}
+    return lemma in {
+        "allnokkur",
+        "allur",
+        "annar",
+        "báðir",
+        "einhver",
+        "einn",
+        "enginn",
+        "fáeinir",
+        "flestallur",
+        "hvorugur",
+        "mestallur",
+        "neinn",
+        "nokkur",
+        "sérhver",
+        "sinnhver",
+        "sinnhvor",
+        "sitthvað",
+        "sitthver",
+        "sitthvor",
+        "sínhver",
+        "sínhvor",
+        "sumur",
+        "sami",
+        "samur",
+        "sjálfur",
+        "slíkur",
+        "ýmis",
+        "þónokkur",
+        "þvílíkur",
+    }
 
 
 def eignarfn(lemma: str) -> bool:
@@ -335,12 +377,22 @@ def beyging_stig(beyging: str, stig: str) -> str:
 
 
 def parse_bin_str(
-    orðmynd: str, lemma: str, kyn_orðflokkur: str, mörk: str
+    orðmynd: str,
+    lemma: str,
+    kyn_orðflokkur: str,
+    mörk: str,
+    samtengingar=Optional[str],
+    afturbeygð_fn=Optional[str],
 ) -> Optional[str]:
+    if len(orðmynd.split()) == 2 or lemma in {"vettugi"}:
+        log.info(f"Skipping {orðmynd} since it is a part of a compound")
+        return None
     if kyn_orðflokkur == "afn":
         # Afturbeygt fornafn er "fp" en krefst kyns, tölu og falls frumlags í setningu.
-        return None
+        return afturbeygð_fn
     elif kyn_orðflokkur == "ao":
+        if stig(mörk) == "f":
+            return "aa"
         return "aa" + stig(mörk)
     elif kyn_orðflokkur == "fn":
         return (
@@ -395,9 +447,9 @@ def parse_bin_str(
         if "SAGNB" in mörk:
             # Sagnbót er túlkað sem lýsingarháttur þátíðar í nefnifall, eintölu, hvorugkyni
             return "sþ" + mynd(mörk) + "hen"
-        if "GM-NH-ÞT" == mörk:
+        if "GM-NH-ÞT" in mörk:
             return "sng--þ"
-        if "GM-BH-ST" == mörk:
+        if "GM-BH-ST" in mörk:
             # Stýfður boðháttur.
             return "sbg2en"
         else:
@@ -411,31 +463,13 @@ def parse_bin_str(
             )
     elif kyn_orðflokkur == "st":
         # MÍM markamengið skilgreinir semtengingu og tilvísunarsamtengingu og við getum því ekki greint á milli.
-        return None
+        return samtengingar
     elif kyn_orðflokkur == "to":
-        # Öll töluorð í BÍN eru frumtölur
+        if mörk == "OBEYGJANLEGT":
+            return "to"
+        # Öll önnur töluorð í BÍN eru frumtölur
         return "tf" + kyn(mörk) + tala(mörk) + fall(mörk)
     elif kyn_orðflokkur == "uh":
         return "au"
     else:
         raise ValueError(f"Unknown {kyn_orðflokkur=}")
-
-
-def main():
-    BIN_LOCATION = "/home/haukurpj/Resources/Data/DIM/DIM_2020.06_SHsnid.csv"
-    legal_ifd_tags = öll_mörk()
-    with open(BIN_LOCATION) as f:
-        for line in f:
-            lemma, auðkenni, kyn_orðflokkur, hluti, orðmynd, mörk = line.strip().split(
-                ";"
-            )
-            mim_mark = parse_bin_str(
-                orðmynd=orðmynd, lemma=lemma, kyn_orðflokkur=kyn_orðflokkur, mörk=mörk
-            )
-            if mim_mark not in legal_ifd_tags:
-                print(f"Röng þýðing: {line=} -> {mim_mark=}")
-
-
-if __name__ == "__main__":
-    pass
-    # main()
