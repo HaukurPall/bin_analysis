@@ -1,16 +1,139 @@
+import itertools
 import re
 from typing import Optional
 
+ORÐFLOKKUR = {"n", "l", "f", "g", "t", "s", "a", "c", "k", "e", "x", "v", "p", "m"}
+KYN = {"k", "v", "h"}
+TALA = {"e", "f"}
+FALL = {"n", "o", "þ", "e"}
+GREINIR = {"g", "-"}
+SÉRNAFN = {"s", "-"}
+BEYGING = {"s", "v", "o"}
+STIG = {"f", "m", "e"}
+PERSÓNA = {"1", "2", "3"}
+HÁTTUR = {"n", "b", "f", "v", "l", "þ"}
+MYND = {"g", "m"}
+TÍÐ = {"n", "þ"}
+FN_FLOKKUR = {"a", "b", "e", "o", "p", "s", "t"}
+TO_FLOKKUR = {"f", "a", "p", "o"}
+AO_FLOKKUR = {"a", "f", "u"}
+ST_FLOKKUR = {"n", "t", "-"}
+SK_FLOKKUR = {"s", "t"}
+PL_FLOKKUR = {"l", "k", "g", "a"}
 
-def read_legal_ifd(path: str) -> set[str]:
-    with open(path) as f:
-        tags = set()
-        for line in f:
-            tags.update(line.strip().split())
-    return tags
+
+def string_product(*args):
+    return ("".join(element) for element in itertools.product(*args))
 
 
-legal_ifd_tags = read_legal_ifd("./legal_ifd_tags.txt")
+# Öll hugsanleg mörk. Það þarf ekki að vera að öll mörkin skilgreind hér geti komið fram í íslensku.
+# Við skilum alltaf mörkum í fullri lengd.
+def no_mörk():
+    """Nafnorð."""
+    return string_product({"n"}, KYN.union({"-"}), TALA, FALL, GREINIR, SÉRNAFN)
+
+
+def lo_mörk():
+    """Lýsingarorð."""
+    return string_product({"l"}, KYN, TALA, FALL, BEYGING, STIG)
+
+
+def fn_mörk():
+    """Fornöfn."""
+    return itertools.chain(
+        string_product({"f"}, FN_FLOKKUR, KYN, TALA, FALL),
+        # Persónufornöfn í 1. og 2. persónu eru kynlaus, en 3. persóna hefur kyn.
+        string_product({"f"}, {"p"}, PERSÓNA - {"3"}, TALA, FALL),
+    )
+
+
+def gr_mörk():
+    """Greinir."""
+    return string_product({"g"}, KYN, TALA, FALL)
+
+
+def to_mörk():
+    """Töluorð."""
+    return itertools.chain(
+        # Ártöl, prósentur og fjöldatölur
+        {"ta---", "tp---", "to---"},
+        # Frumtölur
+        string_product({"t"}, {"f"}, KYN, TALA, FALL),
+    )
+
+
+def so_mörk():
+    """Sagnorð."""
+    return itertools.chain(
+        # Nafnháttur - nútíð er sleppt og ekki til í þáttíð miðmynd
+        {"sng---", "sng--þ", "snm---"},
+        # Boðháttur - alltaf 2.p og nútíð
+        string_product({"sb"}, MYND, {"2"}, TALA, {"n"}),
+        # Lýsingarháttur nútíðar
+        string_product({"slg---", "slm---"}),
+        # Framsögu- og viðtengingarháttur
+        string_product({"s"}, {"f", "v"}, MYND, PERSÓNA, TALA, TÍÐ),
+        # Lýsingarháttur þátíðar - hann virðist vera til í nefnifalli, þolfalli og þágufalli. Setjum líka inn eignarfall til að vera viss.
+        string_product({"s"}, {"þ"}, MYND, KYN, TALA, FALL),
+    )
+
+
+def ao_mörk():
+    """Atviksorð."""
+    return itertools.chain(
+        string_product({"a"}, AO_FLOKKUR - {"u"}, {"m", "e", "-"}),
+        # Upphrópun
+        {"au-"},
+    )
+
+
+def st_mörk():
+    """Samtengingar."""
+    return string_product({"c"}, ST_FLOKKUR)
+
+
+def greinar_mörk():
+    return string_product({"p"}, PL_FLOKKUR)
+
+
+def sk_mörk():
+    """Skammstafanir."""
+    return string_product({"k"}, SK_FLOKKUR)
+
+
+def öll_mörk(strip=True):
+    mörk = {
+        *no_mörk(),
+        *lo_mörk(),
+        *fn_mörk(),
+        *gr_mörk(),
+        *to_mörk(),
+        *so_mörk(),
+        *ao_mörk(),
+        *st_mörk(),
+        *greinar_mörk(),
+        *sk_mörk(),
+        # Erlend orð
+        "e",
+        # Ógreind
+        "x",
+        # Vefföng
+        "v",
+        # Tákn
+        "m",
+        # Erlend sérnöfn
+        "n----s",
+    }
+    if strip:
+        return {strip_mark(mark) for mark in mörk}
+
+
+def strip_mark(mark: str):
+    """Fjarlægir '-' í lok marks."""
+    mark = mark.rstrip("-")
+    if mark.endswith("-"):
+        return strip_mark(mark)
+    return mark
 
 
 def kyn(mork: str) -> str:
@@ -48,7 +171,7 @@ def beyging(mork: str) -> str:
         return "s"
     if "VB" in mork:
         return "v"
-    return "svó"
+    return ""
 
 
 frumstig = re.compile(r"F(ST|SB|VB)")
@@ -100,6 +223,9 @@ def mynd(mork: str) -> str:
         return "g"
     if "MM" in mork:
         return "m"
+    if "LHÞT" in mork:
+        # Allur LHÞT í BÍN er í germynd
+        return "g"
     return ""
 
 
@@ -107,6 +233,9 @@ def tíð(mork: str) -> str:
     if "NT" in mork:
         return "n"
     if "ÞT" in mork:
+        # Til að við tvíteljum ekki tíðina
+        if "LHÞT" in mork:
+            return ""
         return "þ"
     return ""
 
@@ -191,6 +320,20 @@ def fn_flokkur(lemma: str, mörk: str) -> str:
     return ""
 
 
+def greinir_sérnafn(greinir: str, sérnafn: str) -> str:
+    if not greinir and sérnafn:
+        return "-s"
+    else:
+        return greinir + sérnafn
+
+
+def beyging_stig(beyging: str, stig: str) -> str:
+    if beyging == "" and stig == "m":
+        # Veik beyging fyrir miðstig
+        return "vm"
+    return beyging + stig
+
+
 def parse_bin_str(
     orðmynd: str, lemma: str, kyn_orðflokkur: str, mörk: str
 ) -> Optional[str]:
@@ -213,13 +356,34 @@ def parse_bin_str(
     elif kyn_orðflokkur == "gr":
         return "g" + kyn(mörk) + tala(mörk) + fall(mörk)
     elif kyn_orðflokkur == "hk":
-        return "nh" + tala(mörk) + fall(mörk) + greinir(mörk) + sérnafn(orðmynd)
+        return (
+            "nh"
+            + tala(mörk)
+            + fall(mörk)
+            + greinir_sérnafn(greinir(mörk), sérnafn(orðmynd))
+        )
     elif kyn_orðflokkur == "kk":
-        return "nk" + tala(mörk) + fall(mörk) + greinir(mörk) + sérnafn(orðmynd)
+        return (
+            "nk"
+            + tala(mörk)
+            + fall(mörk)
+            + greinir_sérnafn(greinir(mörk), sérnafn(orðmynd))
+        )
     elif kyn_orðflokkur == "kvk":
-        return "nv" + tala(mörk) + fall(mörk) + greinir(mörk) + sérnafn(orðmynd)
+        return (
+            "nv"
+            + tala(mörk)
+            + fall(mörk)
+            + greinir_sérnafn(greinir(mörk), sérnafn(orðmynd))
+        )
     elif kyn_orðflokkur == "lo":
-        return "l" + kyn(mörk) + tala(mörk) + fall(mörk) + beyging(mörk) + stig(mörk)
+        return (
+            "l"
+            + kyn(mörk)
+            + tala(mörk)
+            + fall(mörk)
+            + beyging_stig(beyging(mörk), stig(mörk))
+        )
     elif kyn_orðflokkur == "nhm":
         return "cn"
     elif kyn_orðflokkur == "pfn":
@@ -232,8 +396,7 @@ def parse_bin_str(
             # Sagnbót er túlkað sem lýsingarháttur þátíðar í nefnifall, eintölu, hvorugkyni
             return "sþ" + mynd(mörk) + "hen"
         if "GM-NH-ÞT" == mörk:
-            # Tíðin kemur ekki inn.
-            return "sng"
+            return "sng--þ"
         if "GM-BH-ST" == mörk:
             # Stýfður boðháttur.
             return "sbg2en"
@@ -242,10 +405,8 @@ def parse_bin_str(
                 "s"
                 + háttur(mörk)
                 + mynd(mörk)
-                + pers(mörk)
-                + kyn(mörk)
-                + tala(mörk)
-                + tíð(mörk)
+                + (pers(mörk) + kyn(mörk))
+                + (tala(mörk) + tíð(mörk))
                 + fall(mörk)
             )
     elif kyn_orðflokkur == "st":
@@ -258,3 +419,23 @@ def parse_bin_str(
         return "au"
     else:
         raise ValueError(f"Unknown {kyn_orðflokkur=}")
+
+
+def main():
+    BIN_LOCATION = "/home/haukurpj/Resources/Data/DIM/DIM_2020.06_SHsnid.csv"
+    legal_ifd_tags = öll_mörk()
+    with open(BIN_LOCATION) as f:
+        for line in f:
+            lemma, auðkenni, kyn_orðflokkur, hluti, orðmynd, mörk = line.strip().split(
+                ";"
+            )
+            mim_mark = parse_bin_str(
+                orðmynd=orðmynd, lemma=lemma, kyn_orðflokkur=kyn_orðflokkur, mörk=mörk
+            )
+            if mim_mark not in legal_ifd_tags:
+                print(f"Röng þýðing: {line=} -> {mim_mark=}")
+
+
+if __name__ == "__main__":
+    pass
+    # main()
